@@ -77,12 +77,11 @@ function scoreColor(score: number): string {
 function Dashboard() {
   const navigate = useNavigate()
   const [state, setState] = useState<'loading' | 'authed' | 'guest' | 'misconfigured'>('loading')
-  const [userId, setUserId] = useState<string | null>(null)
+  // userId убран: читается из profile.id, отдельное состояние не нужно.
   const [profile, setProfile] = useState<Profile | null>(null)
   const [vacancies, setVacancies] = useState<VacancyRow[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Фильтры ленты (живут отдельно от формы профиля, чтобы сброс формы не трогал выбор пользователя).
   const [cityFilter, setCityFilter] = useState('')
   const [remoteOnly, setRemoteOnly] = useState(false)
 
@@ -101,20 +100,16 @@ function Dashboard() {
         return
       }
       const uid = sessionData.session.user.id
-      setUserId(uid)
 
-      // Параллельная загрузка профиля и всех вакансий.
       const [profileRes, vacanciesRes] = await Promise.all([
         sb.from('profiles').select('*').eq('id', uid).single(),
         sb.from('vacancies').select('*').order('published_at', { ascending: false }).limit(50),
       ])
       if (cancelled) return
 
-      // --- обработка профиля ---
       if (profileRes.error) {
         const code = (profileRes.error as unknown as { code?: string }).code
         if (code === 'PGRST116') {
-          // Нет строки профиля -> создаём пустую форму локально, запись появится при первом сохранении.
           setProfile({ id: uid, email: sessionData.session.user.email ?? '', ...EMPTY_PROFILE })
         } else {
           setLoadError(`Не удалось загрузить профиль: ${profileRes.error.message}`)
@@ -132,7 +127,6 @@ function Dashboard() {
         })
       }
 
-      // --- обработка вакансий ---
       if (vacanciesRes.error) {
         setLoadError((prev) => prev ? `${prev}\n${vacanciesRes.error!.message}` : vacanciesRes.error.message)
         setVacancies([])
@@ -173,7 +167,6 @@ function Dashboard() {
     navigate('/login', { replace: true })
   }
 
-  // Применяем фильтры И считаем скоринг одним useMemo. Зависимости: profile.skills, vacancies, cityFilter, remoteOnly.
   const scoredVacancies: ScoredVacancy<VacancyRow>[] = useMemo(() => {
     if (!profile || vacancies.length === 0) return []
     const filtered = vacancies.filter((v) => {
@@ -181,7 +174,6 @@ function Dashboard() {
       if (cityFilter.trim()) {
         const needle = cityFilter.trim().toLowerCase()
         const matchesCity = v.city?.toLowerCase().includes(needle) ?? false
-        // Города совпадают ИЛИ позиция удалённая (пользователь может работать откуда угодно).
         if (!matchesCity && !v.remote) return false
       }
       return true
@@ -211,14 +203,12 @@ function Dashboard() {
           </p>
         )}
 
-        {/* Блок 1: форма профиля */}
         {profile ? (
           <ProfileForm profile={profile} onSaved={setProfile} />
         ) : (
           !loadError && <p className="text-slate-500">Подготовка формы…</p>
         )}
 
-        {/* Блок 2: лента вакансий */}
         <section className="space-y-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <h2 className="text-lg font-bold text-slate-900">Рекомендованные вакансии</h2>
@@ -329,7 +319,7 @@ function VacancyCard({ vacancy }: { vacancy: ScoredVacancy<VacancyRow> }) {
   )
 }
 
-// ===================== ФОРМА ПРОФИЛЯ (перенесена без изменений из Шага 23) =====================
+// ===================== ФОРМА ПРОФИЛЯ =====================
 
 function ProfileForm({ profile, onSaved }: { profile: Profile; onSaved: (next: Profile) => void }) {
   const [fullName, setFullName] = useState(profile.full_name ?? '')
@@ -422,8 +412,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return (<label className="block"><span className="block text-sm font-medium text-slate-700 mb-1">{label}</span>{children}</label>)
 }
 
-function TextInput(props: React.InputHTMLAttributes<HTMLInputElement> & { onChange: (v: string) => void }) {
-  const { onChange, ...rest } = props
+/**
+ * Исправленный TextInput.
+ * Ключевая правка: Omit<..., 'onChange'> убирает нативный ChangeEventHandler из базового типа,
+ * чтобы наше поле onChange имело единственный тип (v: string) => void без пересечения.
+ * Именно это чинит пять ошибок TS2322 в логе сборки.
+ */
+function TextInput({
+  onChange,
+  ...rest
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> & { onChange: (v: string) => void }) {
   return (
     <input
       {...rest}
