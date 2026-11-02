@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase'
 
 type Mode = 'login' | 'signup'
 
 export default function Login() {
+  const navigate = useNavigate()
   const configured = isSupabaseConfigured()
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
@@ -11,10 +13,8 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
-  const [userId, setUserId] = useState<string | null>(null)
 
-  // Если env не задан — не рендерим форму, а говорим почему. Это страховка
-  // от «белого экрана без ошибок»: человек видит причину текстом.
+  // env не задан -> не рендерим форму, говорим почему (страховка от «тихого» fail).
   if (!configured) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
@@ -58,11 +58,10 @@ export default function Login() {
           return
         }
         if (data.session) {
-          setUserId(data.session.user.id)
-          setInfo('Вход выполнен.')
-        } else {
-          setError('Сессия не получена. Попробуйте подтвердить email и войти снова.')
+          navigate('/dashboard', { replace: true })
+          return
         }
+        setError('Сессия не получена. Подтвердите email и войдите снова.')
       } else {
         const { data, error: err } = await sb.auth.signUp({
           email: email.trim(),
@@ -73,35 +72,19 @@ export default function Login() {
           return
         }
         if (data.session) {
-          // Confirmation email выключен — пускаем сразу.
-          setUserId(data.session.user.id)
-          setInfo('Аккаунт создан, вход выполнен.')
-        } else if (data.user) {
-          // Confirmation email включён — сессии нет, ждём письмо.
-          setInfo('Аккаунт создан. Проверьте почту и подтвердите адрес, затем войдите.')
-        } else {
-          setError('Не удалось создать аккаунт. Попробуйте ещё раз.')
+          // confirmation email выключен -> пускаем сразу на дашборд.
+          navigate('/dashboard', { replace: true })
+          return
         }
+        if (data.user) {
+          // confirmation email включён -> сессии нет, ждём письмо, НЕ навигируем.
+          setInfo('Аккаунт создан. Проверьте почту и подтвердите адрес, затем войдите.')
+          return
+        }
+        setError('Не удалось создать аккаунт. Попробуйте ещё раз.')
       }
     } catch (err) {
-      // Любое неожиданное падение сети/клиента — текстом, а не тихим fail.
       setError(err instanceof Error ? err.message : 'Неизвестная ошибка.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function handleLogout() {
-    const sb = getSupabase()
-    if (!sb) return
-    setBusy(true)
-    try {
-      await sb.auth.signOut()
-      setUserId(null)
-      setInfo('Вы вышли.')
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось выйти.')
     } finally {
       setBusy(false)
     }
@@ -117,7 +100,6 @@ export default function Login() {
           <p className="text-sm text-slate-500">Карьерный радар — личный AI-ассистент по поиску работы</p>
         </header>
 
-        {/* Переключатель режимов */}
         <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
           <button
             type="button"
@@ -147,7 +129,7 @@ export default function Login() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              disabled={busy || !!userId}
+              disabled={busy}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary disabled:opacity-60"
               placeholder="you@example.com"
               required
@@ -161,7 +143,7 @@ export default function Login() {
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              disabled={busy || !!userId}
+              disabled={busy}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary disabled:opacity-60"
               placeholder="Минимум 6 символов"
               minLength={6}
@@ -174,35 +156,19 @@ export default function Login() {
               {error}
             </p>
           )}
-          {info && !userId && (
+          {info && (
             <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
               {info}
             </p>
           )}
 
-          {userId ? (
-            <div className="space-y-3">
-              <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 break-all">
-                Вы вошли. ID пользователя: <span className="font-mono">{userId}</span>
-              </p>
-              <button
-                type="button"
-                onClick={handleLogout}
-                disabled={busy}
-                className="w-full rounded-lg border border-slate-300 py-2 font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-60"
-              >
-                Выйти
-              </button>
-            </div>
-          ) : (
-            <button
-              type="submit"
-              disabled={busy}
-              className="w-full rounded-lg bg-primary hover:bg-blue-700 text-white font-semibold py-2.5 transition disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {busy ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Создать аккаунт'}
-            </button>
-          )}
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full rounded-lg bg-primary hover:bg-blue-700 text-white font-semibold py-2.5 transition disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {busy ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Создать аккаунт'}
+          </button>
         </form>
 
         <p className="text-center text-xs text-slate-400">
