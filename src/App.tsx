@@ -17,7 +17,6 @@ type Profile = {
   skills: string[]
 }
 
-/** Форма строки вакансии как приходит из PostgREST. */
 type VacancyRow = {
   id: string
   external_id: string | null
@@ -77,11 +76,9 @@ function scoreColor(score: number): string {
 function Dashboard() {
   const navigate = useNavigate()
   const [state, setState] = useState<'loading' | 'authed' | 'guest' | 'misconfigured'>('loading')
-  // userId убран: читается из profile.id, отдельное состояние не нужно.
   const [profile, setProfile] = useState<Profile | null>(null)
   const [vacancies, setVacancies] = useState<VacancyRow[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
-
   const [cityFilter, setCityFilter] = useState('')
   const [remoteOnly, setRemoteOnly] = useState(false)
 
@@ -140,6 +137,26 @@ function Dashboard() {
     return () => { cancelled = true }
   }, [])
 
+  // 🔑 КЛЮЧЕВАЯ ПРАВКА: useMemo ВЫНЕСЕН ВЫШЕ всех ранних возвратов.
+  // Теперь он вызывается ВСЕГДА, независимо от значения state.
+  // Внутри memo проверяем условия безопасности (профиль загружен? вакансии есть?),
+  // но сам факт вызова хука не зависит от этих условий.
+  const scoredVacancies: ScoredVacancy<VacancyRow>[] = useMemo(() => {
+    if (!profile || vacancies.length === 0) return []
+    const filtered = vacancies.filter((v) => {
+      if (remoteOnly && !v.remote) return false
+      if (cityFilter.trim()) {
+        const needle = cityFilter.trim().toLowerCase()
+        const matchesCity = v.city?.toLowerCase().includes(needle) ?? false
+        if (!matchesCity && !v.remote) return false
+      }
+      return true
+    })
+    return scoreAndSortVacancies(profile.skills, filtered)
+  }, [profile, vacancies, cityFilter, remoteOnly])
+
+  // Все хуки уже вызваны. Дальше можно спокойно делать ранние возвраты —
+  // они больше не влияют на порядок вызова хуков.
   if (state === 'loading') {
     return <p className="min-h-screen grid place-items-center text-slate-500">Загрузка…</p>
   }
@@ -166,20 +183,6 @@ function Dashboard() {
     if (sb) await sb.auth.signOut()
     navigate('/login', { replace: true })
   }
-
-  const scoredVacancies: ScoredVacancy<VacancyRow>[] = useMemo(() => {
-    if (!profile || vacancies.length === 0) return []
-    const filtered = vacancies.filter((v) => {
-      if (remoteOnly && !v.remote) return false
-      if (cityFilter.trim()) {
-        const needle = cityFilter.trim().toLowerCase()
-        const matchesCity = v.city?.toLowerCase().includes(needle) ?? false
-        if (!matchesCity && !v.remote) return false
-      }
-      return true
-    })
-    return scoreAndSortVacancies(profile.skills, filtered)
-  }, [profile, vacancies, cityFilter, remoteOnly])
 
   const hasSkills = !!profile && profile.skills.length > 0
 
@@ -412,12 +415,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return (<label className="block"><span className="block text-sm font-medium text-slate-700 mb-1">{label}</span>{children}</label>)
 }
 
-/**
- * Исправленный TextInput.
- * Ключевая правка: Omit<..., 'onChange'> убирает нативный ChangeEventHandler из базового типа,
- * чтобы наше поле onChange имело единственный тип (v: string) => void без пересечения.
- * Именно это чинит пять ошибок TS2322 в логе сборки.
- */
 function TextInput({
   onChange,
   ...rest
