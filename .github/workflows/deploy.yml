@@ -26,16 +26,6 @@ jobs:
         with:
           node-version: '20'
 
-      # ВРЕМЕННЫЙ diagnostic-шаг: печатает ДЛИНЫ значений, не сами значения.
-      # Длина > 0 => secret долетел до сборки. Удалим после проверки на Шаге 20.
-      - name: Verify Supabase env injected (temporary)
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: |
-          echo "URL length: ${#VITE_SUPABASE_URL}"
-          echo "ANON_KEY length: ${#VITE_SUPABASE_ANON_KEY}"
-
       - name: Install dependencies
         run: npm install
 
